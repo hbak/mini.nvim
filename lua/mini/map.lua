@@ -618,7 +618,13 @@ MiniMap.refresh = function(opts, parts)
   -- Possibly update parts in asynchronous fashion
   if parts.lines then vim.schedule(H.update_map_lines) end
   if parts.scrollbar then vim.schedule(H.update_map_scrollbar) end
-  if parts.integrations then vim.schedule(H.update_map_integrations) end
+
+	vim.schedule(function() MiniMap.highlight_mark_lines() end)
+	-- MiniMap.highlight_mark_lines(marks)
+	if parts.integrations then vim.schedule(H.update_map_integrations) end
+
+	vim.schedule(function() MiniMap.update_mark_locations() end)
+
 end
 
 --- Close map window
@@ -927,6 +933,104 @@ MiniMap.gen_integration.gitsigns = function(hl_groups)
     return line_hl
   end
 end
+
+MiniMap.gen_integration.marks = function(hl_groups)
+	if hl_groups == nil then
+		local hl = 'IncludeInverted'
+		if not vim.fn.hlexists(hl) then
+			hl = 'Include'
+		end
+		hl_groups = { marks = hl }
+	end
+
+  local buf_id = MiniMap.current.buf_data.map
+  local ns_id = H.ns_id.integrations
+
+  return function()
+		local line_hl = {}
+		local marks = MiniMap.get_marks()
+		for _, mark in ipairs(marks) do
+			table.insert(line_hl, { line=mark[2], hl_group = hl_groups.marks })
+    end
+		for _, lh in ipairs(line_hl) do
+			local map_line = H.sourceline_to_mapline(lh.line)
+			H.add_line_hl(buf_id, ns_id, lh.hl_group, map_line - 1)
+		end
+		return line_hl
+	end
+end
+
+
+-- Marks
+MiniMap.get_marks = function()
+	local buf_id = MiniMap.current.buf_data.map
+	local marks = {}
+	-- uppercase
+	for _, data in ipairs(vim.fn.getmarklist()) do
+		local mark = data.mark:sub(2,3)
+		local pos = data.pos
+		if H.is_upper(mark) and pos[1] == buf_id then
+			marks[#marks + 1] = {mark, pos[2], pos[3]}
+		end
+	end
+	-- lowercase
+	for _, data in ipairs(vim.fn.getmarklist("%")) do
+		local mark = data.mark:sub(2, 3)
+		local pos = data.pos
+		if H.is_lower(mark) then
+			marks[#marks + 1] = {mark, pos[2], pos[3]}
+		end
+	end
+	return marks
+end
+
+MiniMap.highlight_mark_lines = function(marks, hl_groups)
+	if hl_groups == nil then
+		local hl = 'IncludeInverted'
+		if not vim.fn.hlexists(hl) then
+			hl = 'Include'
+		end
+		hl_groups = { marks = hl }
+	end
+	if marks == nil then
+		marks = MiniMap.get_marks()
+	end
+
+	local buf_id = MiniMap.current.buf_data.map
+	local ns_id = H.ns_id.integrations
+	-- local ns_id = "mini_marks_hahn"
+
+	local line_hl = {}
+	for _, mark in ipairs(marks) do
+		table.insert(line_hl, { line=mark[2], hl_group = hl_groups.marks })
+	end
+	for _, lh in ipairs(line_hl) do
+		local map_line = H.sourceline_to_mapline(lh.line)
+		H.add_line_hl(buf_id, ns_id, lh.hl_group, map_line - 1)
+	end
+	return line_hl
+end
+
+MiniMap.update_mark_locations = function(marks, hl_groups)
+  if hl_groups == nil then
+		hl_groups = { marks = 'Include' }
+	end
+	if marks == nil then
+		marks = MiniMap.get_marks()
+	end
+  local buf_id = MiniMap.current.buf_data.map
+  local ns_id = H.ns_id.integrations
+  local col = H.cache.scrollbar_data.offset - 1
+	for _, mark in ipairs(marks) do
+		local extmark_opts = {
+			virt_text = { { mark[1], 'Include' } },
+			virt_text_pos = 'overlay',
+			hl_mode = 'blend',
+		}
+		H.set_extmark_safely(buf_id, ns_id, H.sourceline_to_mapline(mark[2]) - 1, col, extmark_opts)
+	end
+end
+
 
 --- Act on content change
 ---
@@ -1542,6 +1646,7 @@ H.update_map_integrations = function()
   end
 end
 
+
 H.sourceline_to_mapline = function(source_line)
   local data = H.cache.encode_data
   local coef = data.rescaled_rows / data.source_rows
@@ -1624,6 +1729,19 @@ H.tbl_repeat = function(x, n)
     table.insert(res, x)
   end
   return res
+end
+
+-- stolen from https://github.com/chentoast/marks.nvim/blob/master/lua/marks/utils.lua
+function H.is_letter(char)
+  return H.is_upper(char) or H.is_lower(char)
+end
+
+function H.is_upper(char)
+  return (65 <= char:byte() and char:byte() <= 90)
+end
+
+function H.is_lower(char)
+  return (97 <= char:byte() and char:byte() <= 122)
 end
 
 return MiniMap
